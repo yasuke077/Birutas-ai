@@ -16,7 +16,8 @@ const client = new Client({
 
 const botSettings = new Map();
 
-client.once('ready', (c) => {
+// Corrigido para evitar o aviso de Deprecation
+client.once('clientReady', (c) => {
     console.log(`🚀 Bot Online: ${c.user.tag}`);
 });
 
@@ -35,11 +36,11 @@ client.on('messageCreate', async (message) => {
         await message.channel.sendTyping();
         const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
-        // NOMES DE MODELOS ATUALIZADOS PARA EVITAR "NO ENDPOINTS FOUND"
+        // NOMES DE MODELOS ATUALIZADOS (Sempre verifique no OpenRouter se são :free)
         const models = {
             "venice": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
-            "deepseek": "deepseek/deepseek-r1:free",
-            "gemini": "google/gemini-2.0-flash-exp:free" // Nome atualizado
+            "deepseek": "deepseek/deepseek-chat:free", // Nome corrigido
+            "gemini": "google/gemini-2.0-flash-exp:free" // Versão 2.0 que é a mais estável agora
         };
 
         const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -47,8 +48,7 @@ client.on('messageCreate', async (message) => {
             headers: { 
                 "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`, 
                 "Content-Type": "application/json",
-                "HTTP-Referer": "https://koyeb.com",
-                "X-Title": "Birutas Bot"
+                "HTTP-Referer": "https://koyeb.com"
             },
             body: JSON.stringify({
                 "model": models[currentAI],
@@ -60,14 +60,14 @@ client.on('messageCreate', async (message) => {
         let aiReply = "";
 
         if (data.error) {
-            aiReply = `❌ **Erro na API:** ${data.error.message}`;
+            aiReply = `❌ **Erro da API:** ${data.error.message}\n*(Dica: Tente trocar de IA nos botões)*`;
         } else {
-            aiReply = data.choices?.[0]?.message?.content || "⚠️ Sem resposta.";
+            aiReply = data.choices?.[0]?.message?.content || "⚠️ IA sem resposta.";
         }
 
         const embed = new EmbedBuilder()
             .setColor(currentAI === 'venice' ? "#FF0000" : (currentAI === 'deepseek' ? "#0099FF" : "#F9D71C"))
-            .setTitle(`IA: ${currentAI.toUpperCase()}`)
+            .setTitle(`IA ATUAL: ${currentAI.toUpperCase()}`)
             .setDescription(aiReply.slice(0, 4000));
 
         const row = new ActionRowBuilder().addComponents(
@@ -80,24 +80,30 @@ client.on('messageCreate', async (message) => {
 
     } catch (e) {
         console.error(e);
-        message.reply("🔥 Erro de conexão.");
+        message.reply("❌ Falha de conexão. Verifique os logs.");
     }
 });
 
+// SISTEMA DE BOTÕES COM PROTEÇÃO CONTRA DELAY
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
     
     try {
-        // Evita o erro 10062 (Unknown Interaction) avisando o Discord que estamos processando
-        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+        // Isso "segura" a interação para não dar erro 10062
+        await interaction.deferUpdate(); 
         
         const newAI = interaction.customId.replace('set_', '');
         botSettings.set(interaction.channelId, newAI);
 
-        await interaction.editReply({ content: `✅ Modo alterado para **${newAI.toUpperCase()}**!` });
+        // Feedback visual imediato
+        await interaction.followUp({ 
+            content: `🔄 IA alterada para **${newAI.toUpperCase()}** neste canal.`, 
+            flags: [MessageFlags.Ephemeral] 
+        });
     } catch (err) {
         console.error("Erro no clique:", err);
     }
 });
 
 client.login(process.env.DISCORD_TOKEN);
+                
