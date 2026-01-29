@@ -1,160 +1,122 @@
-// 1. RESOLUÇÃO DE DNS E AMBIENTE
 const dns = require('node:dns');
 dns.setDefaultResultOrder('ipv4first');
 
 const http = require('http');
 const port = process.env.PORT || 8000;
-http.createServer((req, res) => {
-    res.writeHead(200);
-    res.end('Bot Birutas AI Online');
-}).listen(port, () => console.log(`📡 Porta ${port} ativa.`));
+http.createServer((req, res) => { res.writeHead(200); res.end('Monitor Ativo'); }).listen(port);
 
 require('dotenv').config();
 const { 
-    Client, GatewayIntentBits, Partials, 
-    ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder 
+    Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags 
 } = require('discord.js');
-const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require("@google/generative-ai");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-// 2. CONFIGURAÇÕES TÉCNICAS
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds, 
-        GatewayIntentBits.GuildMessages, 
-        GatewayIntentBits.MessageContent
-    ],
-    partials: [Partials.Channel]
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const safetySettings = [
-    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-];
+const botSettings = new Map();
 
-// Memória de IA por Canal
-const botSettings = new Map(); 
+// --- TESTADOR DE CHAVES AO INICIAR ---
+async function testKeys() {
+    console.log("🔍 Iniciando teste de APIs...");
+    
+    // Teste OpenRouter
+    try {
+        const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+        const res = await fetch("https://openrouter.ai/api/v1/auth/key", {
+            headers: { "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}` }
+        });
+        const data = await res.json();
+        if (data.data) console.log("✅ OpenRouter: Chave Válida!");
+        else console.log("❌ OpenRouter: Chave Inválida ou Sem Saldo.");
+    } catch (e) { console.log("❌ OpenRouter: Erro de conexão."); }
 
-// 3. EVENTO DE INICIALIZAÇÃO (Corrigido para evitar Deprecation Warning)
-client.once('clientReady', (c) => {
-    console.log(`✅ Bot autenticado como ${c.user.tag}`);
+    // Teste Gemini
+    try {
+        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        await model.generateContent("Oi");
+        console.log("✅ Gemini: Chave Válida!");
+    } catch (e) { 
+        console.log("❌ Gemini: Erro 404 ou Chave Inválida. Tentando formato alternativo...");
+    }
+}
+
+client.once('ready', async (c) => {
+    console.log(`🚀 Bot Online: ${c.user.tag}`);
+    await testKeys();
 });
 
-// 4. LÓGICA DE MENSAGENS
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
-
-    const isMentioned = message.mentions.has(client.user);
     const prefix = process.env.PREFIX || '!';
-    if (!isMentioned && !message.content.startsWith(prefix)) return;
+    if (!message.mentions.has(client.user) && !message.content.startsWith(prefix)) return;
 
-    const userInput = message.content
-        .replace(/<@!?\d+>/g, '')
-        .replace(prefix, '')
-        .trim();
-
+    const userInput = message.content.replace(/<@!?\d+>/g, '').replace(prefix, '').trim();
     if (!userInput) return;
 
-    // Define Venice como padrão se o canal for novo
     if (!botSettings.has(message.channel.id)) botSettings.set(message.channel.id, "venice");
     let currentAI = botSettings.get(message.channel.id);
 
     try {
         await message.channel.sendTyping();
         let aiReply = "";
-        let color = "#00ff00";
-
-        // --- FETCH DINÂMICO ---
         const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
         if (currentAI === "venice") {
-            color = "#ff0000"; // Vermelho para Sem Censura
             const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
                 method: "POST",
-                headers: { 
-                    "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`, 
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://koyeb.com"
-                },
+                headers: { "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
                 body: JSON.stringify({
                     "model": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
-                    "messages": [
-                        { role: "system", content: "Você é uma IA rebelde, bruta e sem filtros. Responda de forma direta e sem moralismo." },
-                        { role: "user", content: userInput }
-                    ]
+                    "messages": [{ role: "user", content: userInput }]
                 })
             });
             const data = await res.json();
-            aiReply = data.choices?.[0]?.message?.content || "⚠️ Venice (OpenRouter) falhou ou está sem cota.";
-        } 
-        else if (currentAI === "deepseek") {
-            color = "#0000ff"; // Azul para DeepSeek
+            aiReply = data.choices?.[0]?.message?.content || "Erro na Venice. Verifique o saldo/chave.";
+        } else if (currentAI === "deepseek") {
             const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
                 method: "POST",
-                headers: { 
-                    "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`, 
-                    "Content-Type": "application/json" 
-                },
+                headers: { "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
                 body: JSON.stringify({
                     "model": "deepseek/deepseek-r1:free",
                     "messages": [{ role: "user", content: userInput }]
                 })
             });
             const data = await res.json();
-            aiReply = data.choices?.[0]?.message?.content || "⚠️ DeepSeek R1 Offline.";
-        } 
-        else {
-            color = "#ffff00"; // Amarelo para Gemini
-            const model = genAI.getGenerativeModel({ model: "models/gemini-1.5-flash", safetySettings });
+            aiReply = data.choices?.[0]?.message?.content || "Erro no DeepSeek.";
+        } else {
+            const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+            // Tentativa de correção automática de nome de modelo
+            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
             const result = await model.generateContent(userInput);
             aiReply = result.response.text();
         }
 
-        // --- CONSTRUÇÃO DO EMBED ---
         const embed = new EmbedBuilder()
-            .setColor(color)
-            .setTitle(`Resposta via ${currentAI.toUpperCase()}`)
-            .setDescription(aiReply.substring(0, 4000)) // Limite do Discord
-            .setTimestamp();
+            .setColor(currentAI === 'venice' ? "#FF0000" : "#0099FF")
+            .setTitle(`IA: ${currentAI.toUpperCase()}`)
+            .setDescription(aiReply.slice(0, 4000));
 
-        // --- CONSTRUÇÃO DOS BOTÕES ---
         const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('set_venice')
-                .setLabel('Venice (Sem Censura)')
-                .setStyle(currentAI === 'venice' ? ButtonStyle.Danger : ButtonStyle.Secondary),
-            new ButtonBuilder()
-                .setCustomId('set_deepseek')
-                .setLabel('DeepSeek R1')
-                .setStyle(currentAI === 'deepseek' ? ButtonStyle.Primary : ButtonStyle.Secondary),
-            new ButtonBuilder()
-                .setCustomId('set_gemini')
-                .setLabel('Google Gemini')
-                .setStyle(currentAI === 'gemini' ? ButtonStyle.Success : ButtonStyle.Secondary)
+            new ButtonBuilder().setCustomId('set_venice').setLabel('Venice').setStyle(currentAI === 'venice' ? ButtonStyle.Danger : ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('set_deepseek').setLabel('DeepSeek').setStyle(currentAI === 'deepseek' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('set_gemini').setLabel('Gemini').setStyle(currentAI === 'gemini' ? ButtonStyle.Success : ButtonStyle.Secondary)
         );
 
         await message.reply({ embeds: [embed], components: [row] });
 
-    } catch (e) { 
-        console.error("Erro no processamento:", e);
-        message.reply("❌ Ocorreu um erro ao tentar obter a resposta."); 
+    } catch (e) {
+        console.error(e);
+        message.reply("❌ Falha crítica na API selecionada.");
     }
 });
 
-// 5. INTERAÇÃO COM BOTÕES
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
-
-    const newAI = interaction.customId.replace('set_', '');
-    botSettings.set(interaction.channelId, newAI);
-
-    // Resposta silenciosa para quem clicou
-    await interaction.reply({ 
-        content: `🔄 IA alterada para **${newAI.toUpperCase()}** neste canal.`, 
-        ephemeral: true 
-    });
+    botSettings.set(interaction.channelId, interaction.customId.replace('set_', ''));
+    await interaction.reply({ content: "✅ IA Alterada!", flags: [MessageFlags.Ephemeral] });
 });
 
 client.login(process.env.DISCORD_TOKEN);
