@@ -1,3 +1,10 @@
+const express = require('express');
+const app = express();
+
+// Mini-servidor para manter o bot online no plano free
+app.get('/', (req, res) => res.send('Birutas AI Online! 🚀'));
+app.listen(process.env.PORT || 3000, () => console.log('Monitoramento Web Ativo'));
+
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
 const fetch = require('node-fetch');
 const fs = require('fs');
@@ -127,7 +134,7 @@ client.on('messageCreate', async (message) => {
 
             context.push({ role: "user", content: message.content });
             context.push({ role: "assistant", content: aiText });
-            if (context.length > 10) context.splice(0, 2); // Aumentei a memória para 5 pares (10 total)
+            if (context.length > 10) context.splice(0, 2); 
             saveDB();
 
             const embed = new EmbedBuilder()
@@ -143,7 +150,6 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// Interações de botões e Menu (Cargos + Nomes)
 client.on('interactionCreate', async (interaction) => {
     if (interaction.isStringSelectMenu() && interaction.customId === 'select_channel') {
         const channelId = interaction.values[0];
@@ -176,3 +182,4 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+            
