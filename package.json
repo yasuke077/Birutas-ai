@@ -1,17 +1,14 @@
 {
-  "name": "birutas-ai",
+  "name": "birutas-ai-pro",
   "version": "1.0.0",
+  "description": "Bot de IA Multi-Modelo",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
-  "engines": {
-    "node": "18.x"
-  },
   "dependencies": {
     "discord.js": "^14.13.0",
     "dotenv": "^16.3.1",
-    "@google/generative-ai": "^0.21.0",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^2.7.0"
   }
 }
