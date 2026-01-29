@@ -1,84 +1,123 @@
+require('dotenv').config();
+const fs = require('fs');
 const dns = require('node:dns');
 dns.setDefaultResultOrder('ipv4first');
 
+// Servidor para o Koyeb não dar erro de health
 const http = require('http');
-// Servidor HTTP para o Health Check do Koyeb
-const port = process.env.PORT || 8000;
-http.createServer((req, res) => {
-    res.writeHead(200);
-    res.end('Bot Birutas AI está online e operante.');
-}).listen(port, () => console.log(`[SISTEMA] Porta ${port} aberta para o Koyeb.`));
+http.createServer((req, res) => { res.writeHead(200); res.end('Birutas AI Pro Online'); }).listen(process.env.PORT || 8000);
 
 const { 
     Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, 
-    ButtonStyle, EmbedBuilder, MessageFlags, ActivityType 
+    ButtonStyle, EmbedBuilder, MessageFlags, ActivityType,
+    ChannelSelectMenuBuilder, ChannelType, ComponentType
 } = require('discord.js');
 
-// Verificação de Variáveis de Ambiente (Variables do Koyeb)
-const REQUIRED_VARS = ['DISCORD_TOKEN', 'OPENROUTER_API_KEY', 'PREFIX'];
-REQUIRED_VARS.forEach(v => {
-    if (!process.env[v]) {
-        console.error(`[ERRO FATAL] A variável ${v} não foi definida no painel do Koyeb!`);
-        process.exit(1);
-    }
-});
-
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
-    ]
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
-const botSettings = new Map();
+// --- SISTEMA DE PERSISTÊNCIA ---
+const DB_FILE = './database.json';
+let db = { allowedChannels: [], channelAIs: {} };
 
-client.once('ready', (c) => {
-    console.log(`[SUCESSO] Logado como ${c.user.tag}`);
-    c.user.setActivity('Conversas Inteligentes', { type: ActivityType.Listening });
+function saveDB() { fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2)); }
+if (fs.existsSync(DB_FILE)) { db = JSON.parse(fs.readFileSync(DB_FILE)); }
+
+// --- MAPEAMENTO DE MODELOS (ATUALIZADOS 2026) ---
+// Estes nomes são os endpoints gratuitos mais estáveis do OpenRouter hoje
+const AI_MODELS = {
+    venice: {
+        id: "mistralai/mistral-7b-instruct:free",
+        name: "Venice (Mistral)",
+        color: "#ff4747",
+        style: ButtonStyle.Danger,
+        prompt: "Você é a Venice, uma IA rebelde, debochada e sem filtros. Responda sempre em Português do Brasil."
+    },
+    deepseek: {
+        id: "deepseek/deepseek-chat",
+        name: "DeepSeek R1",
+        color: "#0099ff",
+        style: ButtonStyle.Primary,
+        prompt: "Você é o DeepSeek. Responda sempre em Português do Brasil com clareza e precisão."
+    },
+    gemini: {
+        id: "google/gemini-2.0-flash-exp:free",
+        name: "Gemini 2.0",
+        color: "#f1c40f",
+        style: ButtonStyle.Success,
+        prompt: "Você é o Gemini 2.0 da Google. Responda sempre em Português do Brasil de forma útil."
+    }
+};
+
+// --- INTERFACE DE BOTÕES DINÂMICA ---
+function createComponents(currentId) {
+    const row = new ActionRowBuilder();
+    
+    Object.keys(AI_MODELS).forEach(key => {
+        const model = AI_MODELS[key];
+        row.addComponents(
+            new ButtonBuilder()
+                .setCustomId(`ai_${key}`)
+                .setLabel(model.name)
+                .setStyle(currentId === key ? model.style : ButtonStyle.Secondary)
+                .setDisabled(currentId === key) // Desativa o botão da IA que já está ativa
+        );
+    });
+    
+    return [row];
+}
+
+client.once('clientReady', (c) => {
+    console.log(`\x1b[32m[SISTEMA]\x1b[0m Bot ${c.user.tag} iniciado com sucesso.`);
 });
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
-    const prefix = process.env.PREFIX;
-    const isMention = message.mentions.has(client.user);
-    if (!isMention && !message.content.startsWith(prefix)) return;
+    // Comando de Configuração (Apenas para quem tem permissão de gerenciar canais)
+    if (message.content === '!config' && message.member.permissions.has('ManageChannels')) {
+        const row = new ActionRowBuilder().addComponents(
+            new ChannelSelectMenuBuilder()
+                .setCustomId('select_channel')
+                .setPlaceholder('Escolha o canal oficial do Birutas AI')
+                .setChannelTypes(ChannelType.GuildText)
+        );
 
-    const userInput = message.content
-        .replace(/<@!?\d+>/g, '')
-        .replace(prefix, '')
-        .trim();
+        return message.reply({ 
+            content: '📌 **Configuração de Chat:** Selecione abaixo qual canal eu devo monitorar.', 
+            components: [row] 
+        });
+    }
 
+    // VERIFICAÇÃO DE CANAL PERMITIDO
+    if (!db.allowedChannels.includes(message.channelId)) return;
+
+    const prefix = process.env.PREFIX || '!';
+    if (!message.mentions.has(client.user) && !message.content.startsWith(prefix)) return;
+
+    const userInput = message.content.replace(/<@!?\d+>/g, '').replace(prefix, '').trim();
     if (!userInput) return;
 
-    // IA Padrão por canal
-    if (!botSettings.has(message.channel.id)) botSettings.set(message.channel.id, "venice");
-    let currentAI = botSettings.get(message.channel.id);
+    // IA ATUAL DO CANAL
+    const currentKey = db.channelAIs[message.channelId] || "deepseek";
+    const modelCfg = AI_MODELS[currentKey];
 
     try {
         await message.channel.sendTyping();
         const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
-
-        // Mapeamento de Modelos Profissionais
-        const models = {
-            "venice": "cognitivecomputations/dolphin-mistral-24b-venice-edition",
-            "deepseek": "deepseek/deepseek-chat",
-            "gemini": "google/gemini-flash-1.5"
-        };
 
         const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
             headers: { 
                 "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`, 
                 "Content-Type": "application/json",
-                "HTTP-Referer": "https://koyeb.com",
-                "X-Title": "Birutas AI Multi-Modo"
+                "X-Title": "Birutas Pro"
             },
             body: JSON.stringify({
-                "model": models[currentAI],
+                "model": modelCfg.id,
                 "messages": [
-                    { role: "system", content: "Você é um assistente prestativo chamado Birutas AI." },
+                    { role: "system", content: modelCfg.prompt },
                     { role: "user", content: userInput }
                 ]
             })
@@ -86,55 +125,60 @@ client.on('messageCreate', async (message) => {
 
         const data = await res.json();
         
-        let aiReply = "";
-        let isError = false;
-
         if (data.error) {
-            isError = true;
-            aiReply = `⚠️ **Erro da API:**\n\`\`\`json\n${JSON.stringify(data.error, null, 2)}\n\`\`\``;
-        } else {
-            aiReply = data.choices?.[0]?.message?.content || "Ocorreu um erro inesperado: Resposta vazia.";
+            return message.reply(`❌ **Erro na API (${currentKey}):** \`${data.error.message}\``);
         }
 
+        const replyContent = data.choices?.[0]?.message?.content || "⚠️ Sem resposta.";
+        
         const embed = new EmbedBuilder()
-            .setColor(isError ? "#ff0000" : (currentAI === 'venice' ? "#ff0000" : "#0099ff"))
-            .setAuthor({ name: `Birutas AI - ${currentAI.toUpperCase()}`, iconURL: client.user.displayAvatarURL() })
-            .setDescription(aiReply.slice(0, 4000))
-            .setTimestamp()
-            .setFooter({ text: "Use os botões abaixo para trocar de IA" });
+            .setColor(modelCfg.color)
+            .setAuthor({ name: `Birutas AI - ${modelCfg.name}`, iconURL: client.user.displayAvatarURL() })
+            .setDescription(replyContent.slice(0, 4000))
+            .setTimestamp();
 
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('set_venice').setLabel('Venice').setStyle(currentAI === 'venice' ? ButtonStyle.Danger : ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('set_deepseek').setLabel('DeepSeek').setStyle(currentAI === 'deepseek' ? ButtonStyle.Primary : ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('set_gemini').setLabel('Gemini').setStyle(currentAI === 'gemini' ? ButtonStyle.Success : ButtonStyle.Secondary)
-        );
-
-        await message.reply({ embeds: [embed], components: [row] });
+        await message.reply({ 
+            embeds: [embed], 
+            components: createComponents(currentKey) 
+        });
 
     } catch (e) {
-        console.error("[CRITICAL]", e);
-        message.reply("❌ Erro interno no servidor do bot.");
+        console.error(e);
+        message.reply("🔥 Falha crítica de conexão.");
     }
 });
 
-// Listener de Botões Otimizado
+// --- HANDLER DE INTERAÇÕES (BOTÕES E MENU) ---
 client.on('interactionCreate', async (interaction) => {
-    if (!interaction.isButton()) return;
+    // 1. Seleção de Canal (Menu)
+    if (interaction.isChannelSelectMenu()) {
+        const selectedId = interaction.values[0];
+        if (!db.allowedChannels.includes(selectedId)) {
+            db.allowedChannels.push(selectedId);
+            saveDB();
+        }
+        return interaction.reply({ content: `✅ Canal <#${selectedId}> autorizado!`, flags: [MessageFlags.Ephemeral] });
+    }
 
-    try {
-        await interaction.deferUpdate(); // Evita o erro 10062 do Discord
+    // 2. Troca de IA (Botões)
+    if (interaction.isButton() && interaction.customId.startsWith('ai_')) {
+        const newKey = interaction.customId.replace('ai_', '');
+        db.channelAIs[interaction.channelId] = newKey;
+        saveDB();
+
+        const modelCfg = AI_MODELS[newKey];
         
-        const newAI = interaction.customId.replace('set_', '');
-        botSettings.set(interaction.channelId, newAI);
+        // EDIÇÃO DA MENSAGEM ORIGINAL (Sem flood)
+        const oldEmbed = EmbedBuilder.from(interaction.message.embeds[0]);
+        oldEmbed.setColor(modelCfg.color);
+        oldEmbed.setAuthor({ name: `Birutas AI - ${modelCfg.name}`, iconURL: client.user.displayAvatarURL() });
 
-        await interaction.followUp({ 
-            content: `🔄 Inteligência alterada para **${newAI.toUpperCase()}** neste canal.`, 
-            flags: [MessageFlags.Ephemeral] 
+        await interaction.update({
+            embeds: [oldEmbed],
+            components: createComponents(newKey)
         });
-    } catch (err) {
-        console.error("[INTERACTION ERROR]", err);
     }
 });
 
 client.login(process.env.DISCORD_TOKEN);
-                     
+                                  
