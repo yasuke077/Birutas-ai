@@ -1,4 +1,18 @@
 {
   "allowedChannels": [],
-  "channelAIs": {}
+  "bannedChannels": [],
+  "adminRole": null,
+  "logChannel": null,
+  "channelAIs": {},
+  "memory": {},
+  "economy": {},
+  "voiceTime": {},
+  "voiceConfig": {
+    "coinsPerMin": 10,
+    "minMinutes": 1,
+    "allowMuted": false,
+    "allowAlone": false
+  },
+  "customIAs": {},
+  "presets": {}
 }
