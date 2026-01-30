@@ -1,3 +1,16 @@
+// --- FIX PARA NODE 18 (Cria a classe File que está faltando) ---
+if (typeof File === 'undefined') {
+    const { Blob } = require('buffer');
+    global.File = class File extends Blob {
+        constructor(parts, filename, options = {}) {
+            super(parts, options);
+            this.name = filename;
+            this.lastModified = Date.now();
+        }
+        get [Symbol.toStringTag]() { return 'File'; }
+    };
+}
+
 const { 
     Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, 
     ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, 
