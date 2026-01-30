@@ -1,271 +1,209 @@
-// --- FIX PARA NODE 18 (Cria a classe File que está faltando) ---
-if (typeof File === 'undefined') {
-    const { Blob } = require('buffer');
-    global.File = class File extends Blob {
-        constructor(parts, filename, options = {}) {
-            super(parts, options);
-            this.name = filename;
-            this.lastModified = Date.now();
-        }
-        get [Symbol.toStringTag]() { return 'File'; }
-    };
-}
-
 const { 
     Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, 
     ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, 
-    REST, Routes, SlashCommandBuilder, AttachmentBuilder 
+    REST, Routes, SlashCommandBuilder, PermissionFlagsBits 
 } = require('discord.js');
 const express = require('express');
 const fetch = require('node-fetch');
 const fs = require('fs');
-const cheerio = require('cheerio');
 
-// --- MONITORAMENTO (RAILWAY FREE) ---
+// --- MONITORAMENTO ---
 const app = express();
-app.get('/', (req, res) => res.send('Birutas AI Online! 🚀'));
+app.get('/', (req, res) => res.send('Birutas PRO Online! 🛡️'));
 app.listen(process.env.PORT || 3000);
 
 const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
+    intents: [
+        GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, 
+        GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildVoiceStates
+    ]
 });
 
-// --- BANCO DE DADOS (CONFIGURAÇÃO CORRETA) ---
+// --- DATABASE BLINDADO ---
 const DB_FILE = './database.json';
-
-// 1. Criamos o objeto inicial padrão
-let db = { 
-    allowedChannels: [], 
-    channelAIs: {}, 
-    memory: {}, 
-    channelPresets: {},
-    customIAs: {
-        deepseek: { id: "deepseek/deepseek-chat", name: "DeepSeek", color: "#0099ff", prompt: "Você é o DeepSeek." }
-    },
-    presets: {} 
+const DEFAULT_IAS = {
+    deepseek: { id: "deepseek/deepseek-chat", name: "DeepSeek", color: "#0099ff", prompt: "Você é o DeepSeek, uma IA útil." },
+    venice: { id: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free", name: "Venice", color: "#ffef00", prompt: "Você é a Venice AI, focada em liberdade e honestidade técnica." }
 };
 
-// 2. Tentamos carregar o ficheiro existente e mesclar com o padrão
+let db = { 
+    allowedChannels: [], bannedChannels: [], adminRole: null, logChannel: null,
+    channelAIs: {}, memory: {}, economy: {}, voiceTime: {},
+    voiceConfig: { coinsPerMin: 10, minMinutes: 1, allowMuted: false, allowAlone: false },
+    customIAs: { ...DEFAULT_IAS }
+};
+
 if (fs.existsSync(DB_FILE)) {
     try { 
-        const savedData = JSON.parse(fs.readFileSync(DB_FILE));
-        db = { ...db, ...savedData }; 
-        
-        // Garante que customIAs nunca fique vazio após o load
-        if (!db.customIAs || Object.keys(db.customIAs).length === 0) {
-            db.customIAs = {
-                deepseek: { id: "deepseek/deepseek-chat", name: "DeepSeek", color: "#0099ff", prompt: "Você é o DeepSeek." }
-            };
-        }
-    } catch (e) { 
-        console.error("Erro ao ler o banco de dados:", e); 
-    }
+        db = { ...db, ...JSON.parse(fs.readFileSync(DB_FILE)) }; 
+        db.customIAs = { ...DEFAULT_IAS, ...db.customIAs };
+    } catch (e) { console.error("Erro ao carregar DB"); }
 }
+const saveDB = () => fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
 
-// 3. Função para salvar
-function saveDB() { 
+// --- SEGURANÇA VIRUSTOTAL ---
+async function checkLinkVT(url) {
+    if (!process.env.VT_API_KEY) return true;
     try {
-        fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2)); 
-    } catch (e) {
-        console.error("Erro ao salvar o banco de dados:", e);
-    }
+        const urlBase64 = Buffer.from(url).toString('base64').replace(/=/g, '');
+        const res = await fetch(`https://www.virustotal.com/api/v3/urls/${urlBase64}`, { headers: { 'x-apikey': process.env.VT_API_KEY } });
+        const data = await res.json();
+        return !(data.data?.attributes?.last_analysis_stats?.malicious > 0);
+    } catch { return true; }
 }
 
-// --- REGISTRO DE COMANDOS DE BARRA (SLASH) ---
+// --- COMANDOS ---
 const commands = [
-    new SlashCommandBuilder().setName('hub').setDescription('Painel central do Birutas'),
-    new SlashCommandBuilder().setName('config').setDescription('Define o canal de chat'),
-    new SlashCommandBuilder().setName('addia')
-        .setDescription('Adiciona uma nova IA')
-        .addStringOption(o => o.setName('id').setDescription('ID do OpenRouter').setRequired(true))
-        .addStringOption(o => o.setName('nome').setDescription('Nome da IA').setRequired(true))
-        .addStringOption(o => o.setName('cor').setDescription('Cor Hex (#ffffff)').setRequired(true))
-        .addStringOption(o => o.setName('prompt').setDescription('Personalidade').setRequired(true)),
-    new SlashCommandBuilder().setName('addpreset')
-        .setDescription('Cria um modo personalizado')
-        .addStringOption(o => o.setName('nome').setDescription('Nome do Modo').setRequired(true))
-        .addStringOption(o => o.setName('instrucoes').setDescription('O que esse modo faz').setRequired(true)),
-    new SlashCommandBuilder().setName('setmode').setDescription('Escolhe um preset/modo para o canal'),
-    new SlashCommandBuilder().setName('reset').setDescription('Limpa a memória do canal atual')
-].map(command => command.toJSON());
+    new SlashCommandBuilder().setName('hub').setDescription('Lista TODOS os comandos do Birutas PRO'),
+    new SlashCommandBuilder().setName('status').setDescription('Saúde do sistema'),
+    new SlashCommandBuilder().setName('permissao').setDescription('Configura o cargo de Gerência').addRoleOption(o => o.setName('cargo').setRequired(true)),
+    new SlashCommandBuilder().setName('config').setDescription('Autoriza a IA neste canal'),
+    new SlashCommandBuilder().setName('banchannel').setDescription('Bane a IA deste canal'),
+    new SlashCommandBuilder().setName('unbanchannel').setDescription('Remove banimento do canal'),
+    new SlashCommandBuilder().setName('logs').setDescription('Define canal de Auditoria'),
+    new SlashCommandBuilder().setName('lock').setDescription('Tranca o chat (ADM)'),
+    new SlashCommandBuilder().setName('unlock').setDescription('Destranca o chat (ADM)'),
+    new SlashCommandBuilder().setName('slowmode').setDescription('Define modo lento').addIntegerOption(o => o.setName('segundos').setRequired(true)),
+    new SlashCommandBuilder().setName('coins').setDescription('Ver seu saldo de Birutas Coins'),
+    new SlashCommandBuilder().setName('daily').setDescription('Resgatar 100 moedas diárias'),
+    new SlashCommandBuilder().setName('rank').setDescription('Ver quem são os mais ricos'),
+    new SlashCommandBuilder().setName('avatar').setDescription('Ver foto de perfil').addUserOption(o => o.setName('user')),
+    new SlashCommandBuilder().setName('resumo').setDescription('IA resume as últimas mensagens'),
+    new SlashCommandBuilder().setName('imagine').setDescription('Gera imagem via prompt').addStringOption(o => o.setName('prompt').setRequired(true)),
+    new SlashCommandBuilder().setName('backup').setDescription('Recebe o database no seu privado'),
+    new SlashCommandBuilder().setName('anuncio').setDescription('Envia mensagem em todos os canais da IA').addStringOption(o => o.setName('texto').setRequired(true)),
+    new SlashCommandBuilder().setName('configvoz').setDescription('Configura ganhos em call')
+        .addIntegerOption(o => o.setName('moedas').setDescription('Coins por minuto'))
+        .addBooleanOption(o => o.setName('mutado').setDescription('Contar se estiver mutado?')),
+    new SlashCommandBuilder().setName('addia').setDescription('Adiciona um novo modelo de IA').addStringOption(o => o.setName('id').setRequired(true)).addStringOption(o => o.setName('nome').setRequired(true)).addStringOption(o => o.setName('prompt').setRequired(true)),
+    new SlashCommandBuilder().setName('setmode').setDescription('Troca a IA do canal atual'),
+    new SlashCommandBuilder().setName('reset').setDescription('Limpa a memória da conversa no canal')
+].map(c => c.toJSON());
 
 client.once('ready', async () => {
-    console.log(`Logado como ${client.user.tag}`);
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-    try {
-        await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
-        console.log('Slash Commands registrados!');
-    } catch (error) { console.error(error); }
+    await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
+    console.log("🛡️ Birutas PRO Ativo e Sincronizado!");
 });
 
-// --- LÓGICA DE BOTÕES ---
-function getAiButtons(channelId) {
-    const currentAi = db.channelAIs[channelId] || 'deepseek';
-    const rows = [];
-    let currentRow = new ActionRowBuilder();
-    
-    // GARANTIA: Se customIAs não existir por erro no JSON, ele usa o padrão
-    const ias = db.customIAs || { 
-        deepseek: { id: "deepseek/deepseek-chat", name: "DeepSeek", color: "#0099ff", prompt: "Você é o DeepSeek." } 
-    };
-    
-    const keys = Object.keys(ias);
-    
-    keys.forEach((key, i) => {
-        // Máximo de 5 botões por linha no Discord
-        if (i > 0 && i % 5 === 0) { 
-            rows.push(currentRow); 
-            currentRow = new ActionRowBuilder(); 
+// --- ECONOMIA DE VOZ ---
+client.on('voiceStateUpdate', (oldS, newS) => {
+    const uid = newS.id;
+    if (!oldS.channelId && newS.channelId) db.voiceTime[uid] = Date.now();
+    else if (oldS.channelId && !newS.channelId && db.voiceTime[uid]) {
+        const mins = Math.floor((Date.now() - db.voiceTime[uid]) / 60000);
+        const conf = db.voiceConfig;
+        if (mins >= conf.minMinutes && (conf.allowMuted || (!oldS.selfMute && !oldS.selfDeaf))) {
+            db.economy[uid] = (db.economy[uid] || 0) + (mins * conf.coinsPerMin);
+            saveDB();
         }
-        
-        currentRow.addComponents(new ButtonBuilder()
-            .setCustomId(`setia_${key}`)
-            .setLabel(ias[key].name || key)
-            .setStyle(currentAi === key ? ButtonStyle.Success : ButtonStyle.Secondary));
-    });
+        delete db.voiceTime[uid];
+    }
+});
 
-    if (currentRow.components.length > 0) rows.push(currentRow);
-    return rows;
-}
+// --- CHAT E CIBERSEGURANÇA ---
+client.on('messageCreate', async (msg) => {
+    if (msg.author.bot) return;
 
-// --- TRATAMENTO DE MENSAGENS (CHAT) ---
-client.on('messageCreate', async (message) => {
-    if (message.author.bot || !db.allowedChannels.includes(message.channel.id)) return;
-
-    let userContent = message.content;
-
-    // LER ARQUIVOS (TXT, JS, etc)
-    if (message.attachments.size > 0) {
-        for (const [id, attachment] of message.attachments) {
-            if (attachment.contentType?.includes('text') || attachment.name.endsWith('.js') || attachment.name.endsWith('.py')) {
-                const res = await fetch(attachment.url);
-                const text = await res.text();
-                userContent += `\n\n[Conteúdo do arquivo ${attachment.name}]:\n${text}`;
+    // Filtro VirusTotal
+    const links = msg.content.match(/\bhttps?:\/\/\S+/gi);
+    if (links && db.allowedChannels.includes(msg.channel.id)) {
+        for (const l of links) {
+            if (!(await checkLinkVT(l))) {
+                await msg.delete().catch(()=>{});
+                return msg.channel.send(`🚫 **SEGURANÇA:** ${msg.author}, link malicioso detectado e removido!`);
             }
         }
     }
 
-    // LER LINKS
-    if (userContent.includes('http')) {
-        const url = userContent.match(/\bhttps?:\/\/\S+/gi)?.[0];
-        try {
-            const webRes = await fetch(url);
-            const html = await webRes.text();
-            const $ = cheerio.load(html);
-            const webText = $('p').text().substring(0, 1000);
-            userContent += `\n\n[Resumo do Link]: ${webText}`;
-        } catch (e) {}
+    if (!db.allowedChannels.includes(msg.channel.id) || db.bannedChannels.includes(msg.channel.id)) return;
+
+    await msg.channel.sendTyping();
+    const ia = db.customIAs[db.channelAIs[msg.channel.id] || 'deepseek'];
+    if (msg.guild.members.me.permissions.has(PermissionFlagsBits.ChangeNickname)) {
+        msg.guild.members.me.setNickname(`Birutas [${ia.name}]`).catch(()=>{});
     }
-
-    const aiKey = db.channelAIs[message.channel.id] || 'deepseek';
-    const model = db.customIAs[aiKey];
-    const presetPrompt = db.channelPresets[message.channel.id] ? ` MODO ATUAL: ${db.channelPresets[message.channel.id]}` : "";
-
-    const thinking = await message.reply("⏳ Processando...");
-    
-    if (!db.memory[message.channel.id]) db.memory[message.channel.id] = [];
-    const context = db.memory[message.channel.id];
 
     try {
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-            body: JSON.stringify({
-                model: model.id,
-                messages: [{ role: "system", content: model.prompt + presetPrompt }, ...context, { role: "user", content: userContent }]
-            })
+        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST", headers: { "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ model: ia.id, messages: [{role:"system", content: ia.prompt}, ...(db.memory[msg.channel.id]||[]).slice(-6), {role:"user", content: msg.content}] })
         });
-        const data = await response.json();
-        const text = data.choices[0].message.content;
+        const data = await res.json();
+        const reply = data.choices[0].message.content;
 
-        context.push({ role: "user", content: message.content }, { role: "assistant", content: text });
-        if (context.length > 10) context.splice(0, 2);
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('snapshot').setLabel('Snapshot').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('stop').setLabel('Parar').setStyle(ButtonStyle.Danger)
+        );
+
+        msg.reply({ content: reply, components: [row] });
+        db.memory[msg.channel.id] = [...(db.memory[msg.channel.id]||[]), {role:"user", content: msg.content}, {role:"assistant", content: reply}];
         saveDB();
-
-        const embed = new EmbedBuilder().setDescription(text).setColor(model.color).setAuthor({ name: model.name });
-        
-        // BOTÃO SNAPSHOT (Se houver código)
-        const components = getAiButtons(message.channel.id);
-        if (text.includes('```')) {
-            const snapBtn = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('snapshot').setLabel('📸 Gerar Snapshot').setStyle(ButtonStyle.Primary)
-            );
-            components.push(snapBtn);
-        }
-
-        await thinking.edit({ content: null, embeds: [embed], components });
-    } catch (e) { await thinking.edit("❌ Erro ao consultar IA."); }
+    } catch (e) { msg.reply("❌ Erro na conexão com a IA."); }
 });
 
-// --- INTERAÇÕES (SLASH + BOTÕES + MENU) ---
+// --- INTERAÇÕES ---
 client.on('interactionCreate', async (int) => {
+    const isAdm = int.member.permissions.has(PermissionFlagsBits.Administrator) || (db.adminRole && int.member.roles.cache.has(db.adminRole));
+
     if (int.isChatInputCommand()) {
         if (int.commandName === 'hub') {
-            await int.reply({ content: "🎮 **Birutas Central**\nUse `/config` para o canal ou botões para IAs.", components: getAiButtons(int.channelId) });
-        }
-        
-        if (int.commandName === 'addia') {
-            const [id, nome, cor, prompt] = [int.options.getString('id'), int.options.getString('nome'), int.options.getString('cor'), int.options.getString('prompt')];
-            db.customIAs[nome.toLowerCase()] = { id, name: nome, color: cor, prompt };
-            saveDB();
-            await int.reply(`✅ IA **${nome}** cadastrada!`);
+            const embed = new EmbedBuilder()
+                .setTitle("🛠️ Hub de Comandos Birutas PRO")
+                .setColor("#00ff00")
+                .addFields(
+                    { name: "👑 Administração", value: "`/permissao` `/config` `/banchannel` `/unbanchannel` `/logs` `/lock` `/unlock` `/slowmode` `/backup` `/anuncio`" },
+                    { name: "💰 Economia", value: "`/coins` `/daily` `/rank` `/configvoz`" },
+                    { name: "🤖 Inteligência & Úteis", value: "`/setmode` `/addia` `/reset` `/imagine` `/resumo` `/status` `/avatar`" }
+                );
+            return int.reply({ embeds: [embed] });
         }
 
-        if (int.commandName === 'addpreset') {
-            const nome = int.options.getString('nome');
-            db.presets[nome] = int.options.getString('instrucoes');
-            saveDB();
-            await int.reply(`✨ Preset **${nome}** criado!`);
+        // Verificação de ADM para comandos sensíveis
+        const admCmds = ['permissao', 'config', 'banchannel', 'unbanchannel', 'logs', 'lock', 'unlock', 'slowmode', 'backup', 'anuncio', 'configvoz', 'addia'];
+        if (admCmds.includes(int.commandName) && !isAdm) return int.reply({ content: "❌ Erro: Você precisa de permissão de Gerência Birutas.", ephemeral: true });
+
+        if (int.commandName === 'config') { if(!db.allowedChannels.includes(int.channelId)) db.allowedChannels.push(int.channelId); saveDB(); return int.reply("✅ Canal autorizado!"); }
+        if (int.commandName === 'banchannel') { if(!db.bannedChannels.includes(int.channelId)) db.bannedChannels.push(int.channelId); saveDB(); return int.reply("🚫 Canal banido!"); }
+        if (int.commandName === 'unbanchannel') { db.bannedChannels = db.bannedChannels.filter(id => id !== int.channelId); saveDB(); return int.reply("✅ Canal desbanido!"); }
+        if (int.commandName === 'lock') { int.channel.permissionOverwrites.edit(int.guild.id, { SendMessages: false }); return int.reply("🔒 Chat trancado!"); }
+        if (int.commandName === 'unlock') { int.channel.permissionOverwrites.edit(int.guild.id, { SendMessages: true }); return int.reply("🔓 Chat liberado!"); }
+        if (int.commandName === 'slowmode') { int.channel.setRateLimitPerUser(int.options.getInteger('segundos')); return int.reply("⏱️ Modo lento configurado!"); }
+        
+        if (int.commandName === 'anuncio') { 
+            db.allowedChannels.forEach(id => { const c = client.channels.cache.get(id); if(c) c.send(`📢 **ANÚNCIO**: ${int.options.getString('texto')}`); }); 
+            return int.reply("✅ Anúncio disparado!"); 
         }
+
+        if (int.commandName === 'daily') {
+            db.economy[int.user.id] = (db.economy[int.user.id] || 0) + 100;
+            saveDB();
+            return int.reply("💵 Você resgatou suas **100 Birutas Coins** diárias!");
+        }
+
+        if (int.commandName === 'coins') return int.reply(`💰 Saldo atual: **${db.economy[int.user.id] || 0} Birutas Coins**`);
 
         if (int.commandName === 'setmode') {
-            const options = Object.keys(db.presets).map(p => ({ label: p, value: p }));
-            if (options.length === 0) return int.reply("Nenhum preset criado. Use `/addpreset`.");
-            
-            const menu = new ActionRowBuilder().addComponents(
-                new StringSelectMenuBuilder().setCustomId('select_preset').setPlaceholder('Escolha um modo').addOptions(options)
-            );
-            const btns = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('clear_mode').setLabel('🔄 Restaurar Padrão').setStyle(ButtonStyle.Danger)
-            );
-            await int.reply({ content: "🛠️ **Modos Disponíveis:**", components: [menu, btns] });
+            const select = new StringSelectMenuBuilder().setCustomId('select_ia').setPlaceholder('Selecione a IA do canal').addOptions(Object.keys(db.customIAs).map(k => ({ label: db.customIAs[k].name, value: k })));
+            return int.reply({ components: [new ActionRowBuilder().addComponents(select)] });
         }
 
-        if (int.commandName === 'reset') {
-            db.memory[int.channelId] = [];
-            saveDB();
-            await int.reply("🧠 Memória do canal limpa!");
-        }
-
-        if (int.commandName === 'config') {
-            if (!db.allowedChannels.includes(int.channelId)) db.allowedChannels.push(int.channelId);
-            saveDB();
-            await int.reply("📍 Este canal agora é oficial do Birutas AI!");
-        }
+        if (int.commandName === 'backup') { await int.user.send({ files: [DB_FILE] }); return int.reply("📂 O database foi enviado no seu privado!"); }
+        if (int.commandName === 'reset') { db.memory[int.channelId] = []; saveDB(); return int.reply("🧹 Memória da IA limpa para este canal!"); }
+        if (int.commandName === 'status') return int.reply(`🛰️ **Online** | Ping: ${client.ws.ping}ms | Uptime: ${Math.floor(process.uptime()/60)}m`);
+        if (int.commandName === 'permissao') { db.adminRole = int.options.getRole('cargo').id; saveDB(); return int.reply("✅ Cargo de ADM configurado!"); }
     }
 
-    // --- INTERAÇÕES DE BOTÃO/MENU ---
+    if (int.isStringSelectMenu() && int.customId === 'select_ia') {
+        db.channelAIs[int.channelId] = int.values[0]; saveDB();
+        return int.update({ content: `✅ IA alterada para: **${db.customIAs[int.values[0]].name}**`, components: [] });
+    }
+
     if (int.isButton()) {
-        if (int.customId.startsWith('setia_')) {
-            const key = int.customId.replace('setia_', '');
-            db.channelAIs[int.channelId] = key;
-            saveDB();
-            await int.update({ components: getAiButtons(int.channelId) });
-        }
-        if (int.customId === 'clear_mode') {
-            delete db.channelPresets[int.channelId];
-            saveDB();
-            await int.update({ content: "✅ Voltamos ao padrão da IA!", components: [] });
-        }
-        if (int.customId === 'snapshot') {
-            await int.reply("📸 Snapshot em alta definição seria gerado aqui! (Requer API de Canvas ou Carbon)");
-        }
-    }
-
-    if (int.isStringSelectMenu() && int.customId === 'select_preset') {
-        db.channelPresets[int.channelId] = db.presets[int.values[0]];
-        saveDB();
-        await int.update({ content: `🚀 Modo **${int.values[0]}** ativado neste canal!`, components: [] });
+        if (int.customId === 'snapshot') return int.reply({ content: `📸 **Snapshot**: https://ray.so/?code=${Buffer.from(int.message.content).toString('base64')}`, ephemeral: true });
+        if (int.customId === 'stop') return int.reply({ content: "⏹️ Resposta parada.", ephemeral: true });
     }
 });
 
