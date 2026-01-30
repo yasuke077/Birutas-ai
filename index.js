@@ -30,17 +30,31 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
-// --- BANCO DE DADOS ---
-const DB_FILE = './database.json';
-let db = { 
-    allowedChannels: [], channelAIs: {}, memory: {}, channelPresets: {},
-    customIAs: {
-        deepseek: { id: "deepseek/deepseek-chat", name: "DeepSeek", color: "#0099ff", prompt: "Você é o DeepSeek." }
-    },
-    presets: {} 
-};
-if (fs.existsSync(DB_FILE)) try { db = JSON.parse(fs.readFileSync(DB_FILE)); } catch (e) {}
-function saveDB() { fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2)); }
+// --- BANCO DE DADOS (VERSÃO CORRIGIDA) ---
+if (fs.existsSync(DB_FILE)) {
+    try { 
+        const savedData = JSON.parse(fs.readFileSync(DB_FILE));
+        // Faz um "merge" para garantir que as categorias obrigatórias existam
+        db = { ...db, ...savedData }; 
+        
+        // Se após o carregamento o customIAs ainda não existir, força a criação do padrão
+        if (!db.customIAs) {
+            db.customIAs = {
+                deepseek: { id: "deepseek/deepseek-chat", name: "DeepSeek", color: "#0099ff", prompt: "Você é o DeepSeek." }
+            };
+        }
+    } catch (e) { 
+        console.error("Erro ao ler o banco de dados:", e); 
+    }
+}
+
+function saveDB() { 
+    try {
+        fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2)); 
+    } catch (e) {
+        console.error("Erro ao salvar o banco de dados:", e);
+    }
+}
 
 // --- REGISTRO DE COMANDOS DE BARRA (SLASH) ---
 const commands = [
@@ -74,13 +88,27 @@ function getAiButtons(channelId) {
     const currentAi = db.channelAIs[channelId] || 'deepseek';
     const rows = [];
     let currentRow = new ActionRowBuilder();
-    const keys = Object.keys(db.customIAs);
+    
+    // GARANTIA: Se customIAs não existir por erro no JSON, ele usa o padrão
+    const ias = db.customIAs || { 
+        deepseek: { id: "deepseek/deepseek-chat", name: "DeepSeek", color: "#0099ff", prompt: "Você é o DeepSeek." } 
+    };
+    
+    const keys = Object.keys(ias);
+    
     keys.forEach((key, i) => {
-        if (i > 0 && i % 5 === 0) { rows.push(currentRow); currentRow = new ActionRowBuilder(); }
+        // Máximo de 5 botões por linha no Discord
+        if (i > 0 && i % 5 === 0) { 
+            rows.push(currentRow); 
+            currentRow = new ActionRowBuilder(); 
+        }
+        
         currentRow.addComponents(new ButtonBuilder()
-            .setCustomId(`setia_${key}`).setLabel(db.customIAs[key].name)
+            .setCustomId(`setia_${key}`)
+            .setLabel(ias[key].name || key)
             .setStyle(currentAi === key ? ButtonStyle.Success : ButtonStyle.Secondary));
     });
+
     if (currentRow.components.length > 0) rows.push(currentRow);
     return rows;
 }
