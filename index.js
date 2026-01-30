@@ -1,185 +1,216 @@
+const { 
+    Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, 
+    ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, 
+    REST, Routes, SlashCommandBuilder, AttachmentBuilder 
+} = require('discord.js');
 const express = require('express');
-const app = express();
-
-// Mini-servidor para manter o bot online no plano free
-app.get('/', (req, res) => res.send('Birutas AI Online! 🚀'));
-app.listen(process.env.PORT || 3000, () => console.log('Monitoramento Web Ativo'));
-
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
 const fetch = require('node-fetch');
 const fs = require('fs');
+const cheerio = require('cheerio');
+
+// --- MONITORAMENTO (RAILWAY FREE) ---
+const app = express();
+app.get('/', (req, res) => res.send('Birutas AI Online! 🚀'));
+app.listen(process.env.PORT || 3000);
 
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
+// --- BANCO DE DADOS ---
 const DB_FILE = './database.json';
 let db = { 
-    allowedChannels: [], 
-    channelAIs: {}, 
-    memory: {},
+    allowedChannels: [], channelAIs: {}, memory: {}, channelPresets: {},
     customIAs: {
-        venice: {
-            id: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
-            name: "Venice",
-            color: "#ff4747",
-            style: ButtonStyle.Danger,
-            prompt: "Você é a Venice, uma IA rebelde. Responda em Português."
-        },
-        deepseek: {
-            id: "deepseek/deepseek-chat",
-            name: "DeepSeek R1",
-            color: "#0099ff",
-            style: ButtonStyle.Primary,
-            prompt: "Você é o DeepSeek R1. Responda em Português."
-        }
-    } 
+        deepseek: { id: "deepseek/deepseek-chat", name: "DeepSeek", color: "#0099ff", prompt: "Você é o DeepSeek." }
+    },
+    presets: {} 
 };
-
-if (fs.existsSync(DB_FILE)) {
-    try { db = { ...db, ...JSON.parse(fs.readFileSync(DB_FILE)) }; } catch (e) {}
-}
-
+if (fs.existsSync(DB_FILE)) try { db = JSON.parse(fs.readFileSync(DB_FILE)); } catch (e) {}
 function saveDB() { fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2)); }
 
-function getAiButtons(currentAi) {
+// --- REGISTRO DE COMANDOS DE BARRA (SLASH) ---
+const commands = [
+    new SlashCommandBuilder().setName('hub').setDescription('Painel central do Birutas'),
+    new SlashCommandBuilder().setName('config').setDescription('Define o canal de chat'),
+    new SlashCommandBuilder().setName('addia')
+        .setDescription('Adiciona uma nova IA')
+        .addStringOption(o => o.setName('id').setDescription('ID do OpenRouter').setRequired(true))
+        .addStringOption(o => o.setName('nome').setDescription('Nome da IA').setRequired(true))
+        .addStringOption(o => o.setName('cor').setDescription('Cor Hex (#ffffff)').setRequired(true))
+        .addStringOption(o => o.setName('prompt').setDescription('Personalidade').setRequired(true)),
+    new SlashCommandBuilder().setName('addpreset')
+        .setDescription('Cria um modo personalizado')
+        .addStringOption(o => o.setName('nome').setDescription('Nome do Modo').setRequired(true))
+        .addStringOption(o => o.setName('instrucoes').setDescription('O que esse modo faz').setRequired(true)),
+    new SlashCommandBuilder().setName('setmode').setDescription('Escolhe um preset/modo para o canal'),
+    new SlashCommandBuilder().setName('reset').setDescription('Limpa a memória do canal atual')
+].map(command => command.toJSON());
+
+client.once('ready', async () => {
+    console.log(`Logado como ${client.user.tag}`);
+    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+    try {
+        await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
+        console.log('Slash Commands registrados!');
+    } catch (error) { console.error(error); }
+});
+
+// --- LÓGICA DE BOTÕES ---
+function getAiButtons(channelId) {
+    const currentAi = db.channelAIs[channelId] || 'deepseek';
     const rows = [];
     let currentRow = new ActionRowBuilder();
     const keys = Object.keys(db.customIAs);
-
-    keys.forEach((key, index) => {
-        if (index > 0 && index % 5 === 0) { rows.push(currentRow); currentRow = new ActionRowBuilder(); }
-        const model = db.customIAs[key];
-        currentRow.addComponents(
-            new ButtonBuilder()
-                .setCustomId(`set_${key}`)
-                .setLabel(model.name)
-                .setStyle(currentAi === key ? ButtonStyle.Success : ButtonStyle.Secondary)
-                .setDisabled(currentAi === key)
-        );
+    keys.forEach((key, i) => {
+        if (i > 0 && i % 5 === 0) { rows.push(currentRow); currentRow = new ActionRowBuilder(); }
+        currentRow.addComponents(new ButtonBuilder()
+            .setCustomId(`setia_${key}`).setLabel(db.customIAs[key].name)
+            .setStyle(currentAi === key ? ButtonStyle.Success : ButtonStyle.Secondary));
     });
     if (currentRow.components.length > 0) rows.push(currentRow);
     return rows;
 }
 
+// --- TRATAMENTO DE MENSAGENS (CHAT) ---
 client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
+    if (message.author.bot || !db.allowedChannels.includes(message.channel.id)) return;
 
-    // --- NOVO COMANDO CENTRAL: !hub ---
-    if (message.content === '!hub') {
-        const embed = new EmbedBuilder()
-            .setTitle("🎮 Birutas AI | Central de Controle")
-            .setColor("#5865F2")
-            .setDescription("Bem-vindo ao motor de IAs múltiplas.")
-            .addFields(
-                { name: "⚙️ Configuração", value: "`!config` - Define o canal de chat.", inline: true },
-                { name: "➕ Nova IA", value: "`!addia [ID] [Nome] [Cor] [Prompt]`", inline: true },
-                { name: "🗑️ Remover", value: "`!delia [Nome]`", inline: true },
-                { name: "🧠 Memória", value: "Ativada (Últimas 5 mensagens).", inline: false }
-            )
-            .setFooter({ text: "Use os botões abaixo para gerenciar os modelos." });
-        return message.reply({ embeds: [embed] });
-    }
+    let userContent = message.content;
 
-    // --- COMANDOS DE ADMIN ---
-    if (message.content.startsWith('!addia') && message.member.permissions.has('Administrator')) {
-        const parts = message.content.split(' ');
-        if (parts.length < 5) return message.reply("❌ Erro! Use: `!addia [ID] [Nome] [Cor_Hex] [Personalidade]`");
-        const [_, id, name, color, ...promptParts] = parts;
-        const key = name.toLowerCase().replace(/\s+/g, '_');
-        db.customIAs[key] = { id, name, color: color.startsWith('#') ? color : `#${color}`, prompt: promptParts.join(' ') };
-        saveDB();
-        return message.reply(`✅ IA **${name}** injetada no sistema com sucesso!`);
-    }
-
-    if (message.content.startsWith('!delia') && message.member.permissions.has('Administrator')) {
-        const name = message.content.split(' ')[1]?.toLowerCase();
-        if (!name || !db.customIAs[name]) return message.reply("❌ Modelo não encontrado no banco de dados.");
-        delete db.customIAs[name];
-        saveDB();
-        return message.reply(`🗑️ O modelo **${name}** foi deletado.`);
-    }
-
-    if (message.content === '!config' && message.member.permissions.has('ManageChannels')) {
-        const channels = message.guild.channels.cache.filter(c => c.isTextBased()).map(c => ({ label: c.name, value: c.id }));
-        const menu = new ActionRowBuilder().addComponents(
-            new StringSelectMenuBuilder().setCustomId('select_channel').setPlaceholder('Defina o Canal Oficial').addOptions(channels.slice(0, 25))
-        );
-        return message.reply({ content: '📍 **Configuração de Destino:**', components: [menu] });
-    }
-
-    // --- LÓGICA DE RESPOSTA (MEMÓRIA + EDIÇÃO + TRATAMENTO) ---
-    if (db.allowedChannels.includes(message.channel.id)) {
-        const currentAiKey = db.channelAIs[message.channel.id] || 'deepseek';
-        const modelCfg = db.customIAs[currentAiKey] || db.customIAs['deepseek'];
-
-        if (!db.memory[message.channel.id]) db.memory[message.channel.id] = [];
-        const context = db.memory[message.channel.id];
-
-        const thinkingMsg = await message.reply(`⏳ **${modelCfg.name}** está formulando resposta...`);
-        await message.channel.sendTyping();
-
-        try {
-            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-                method: "POST",
-                headers: { "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    model: modelCfg.id,
-                    messages: [{ role: "system", content: modelCfg.prompt }, ...context, { role: "user", content: message.content }]
-                })
-            });
-
-            const data = await response.json();
-            const aiText = data.choices?.[0]?.message?.content || "❌ Falha crítica no modelo ou cota excedida.";
-
-            context.push({ role: "user", content: message.content });
-            context.push({ role: "assistant", content: aiText });
-            if (context.length > 10) context.splice(0, 2); 
-            saveDB();
-
-            const embed = new EmbedBuilder()
-                .setAuthor({ name: modelCfg.name, iconURL: client.user.displayAvatarURL() })
-                .setDescription(aiText)
-                .setColor(modelCfg.color)
-                .setTimestamp();
-
-            await thinkingMsg.edit({ content: null, embeds: [embed], components: getAiButtons(currentAiKey) });
-        } catch (err) {
-            await thinkingMsg.edit("⚠️ Erro de conexão com o OpenRouter.");
+    // LER ARQUIVOS (TXT, JS, etc)
+    if (message.attachments.size > 0) {
+        for (const [id, attachment] of message.attachments) {
+            if (attachment.contentType?.includes('text') || attachment.name.endsWith('.js') || attachment.name.endsWith('.py')) {
+                const res = await fetch(attachment.url);
+                const text = await res.text();
+                userContent += `\n\n[Conteúdo do arquivo ${attachment.name}]:\n${text}`;
+            }
         }
     }
-});
 
-client.on('interactionCreate', async (interaction) => {
-    if (interaction.isStringSelectMenu() && interaction.customId === 'select_channel') {
-        const channelId = interaction.values[0];
-        if (!db.allowedChannels.includes(channelId)) db.allowedChannels.push(channelId);
-        saveDB();
-        await interaction.update({ content: `✅ Canal <#${channelId}> pronto para receber o Birutas!`, components: [] });
+    // LER LINKS
+    if (userContent.includes('http')) {
+        const url = userContent.match(/\bhttps?:\/\/\S+/gi)?.[0];
+        try {
+            const webRes = await fetch(url);
+            const html = await webRes.text();
+            const $ = cheerio.load(html);
+            const webText = $('p').text().substring(0, 1000);
+            userContent += `\n\n[Resumo do Link]: ${webText}`;
+        } catch (e) {}
     }
 
-    if (interaction.isButton() && interaction.customId.startsWith('set_')) {
-        const newAiKey = interaction.customId.replace('set_', '');
-        const modelCfg = db.customIAs[newAiKey];
-        db.channelAIs[interaction.channel.id] = newAiKey;
+    const aiKey = db.channelAIs[message.channel.id] || 'deepseek';
+    const model = db.customIAs[aiKey];
+    const presetPrompt = db.channelPresets[message.channel.id] ? ` MODO ATUAL: ${db.channelPresets[message.channel.id]}` : "";
+
+    const thinking = await message.reply("⏳ Processando...");
+    
+    if (!db.memory[message.channel.id]) db.memory[message.channel.id] = [];
+    const context = db.memory[message.channel.id];
+
+    try {
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+                model: model.id,
+                messages: [{ role: "system", content: model.prompt + presetPrompt }, ...context, { role: "user", content: userContent }]
+            })
+        });
+        const data = await response.json();
+        const text = data.choices[0].message.content;
+
+        context.push({ role: "user", content: message.content }, { role: "assistant", content: text });
+        if (context.length > 10) context.splice(0, 2);
         saveDB();
 
-        const member = interaction.guild.members.me;
-        try {
-            await member.setNickname(`Birutas | ${modelCfg.name}`);
-            const allNames = Object.values(db.customIAs).map(ia => ia.name);
-            const toRemove = interaction.guild.roles.cache.filter(r => allNames.includes(r.name) && r.name !== modelCfg.name);
-            const toAdd = interaction.guild.roles.cache.find(r => r.name === modelCfg.name);
-            if (toRemove.size > 0) await member.roles.remove(toRemove);
-            if (toAdd) await member.roles.add(toAdd);
-        } catch (e) {}
+        const embed = new EmbedBuilder().setDescription(text).setColor(model.color).setAuthor({ name: model.name });
+        
+        // BOTÃO SNAPSHOT (Se houver código)
+        const components = getAiButtons(message.channel.id);
+        if (text.includes('```')) {
+            const snapBtn = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('snapshot').setLabel('📸 Gerar Snapshot').setStyle(ButtonStyle.Primary)
+            );
+            components.push(snapBtn);
+        }
 
-        const currentEmbed = interaction.message.embeds[0];
-        const newEmbed = EmbedBuilder.from(currentEmbed).setColor(modelCfg.color).setAuthor({ name: modelCfg.name, iconURL: client.user.displayAvatarURL() });
+        await thinking.edit({ content: null, embeds: [embed], components });
+    } catch (e) { await thinking.edit("❌ Erro ao consultar IA."); }
+});
 
-        await interaction.update({ embeds: [newEmbed], components: getAiButtons(newAiKey) });
+// --- INTERAÇÕES (SLASH + BOTÕES + MENU) ---
+client.on('interactionCreate', async (int) => {
+    if (int.isChatInputCommand()) {
+        if (int.commandName === 'hub') {
+            await int.reply({ content: "🎮 **Birutas Central**\nUse `/config` para o canal ou botões para IAs.", components: getAiButtons(int.channelId) });
+        }
+        
+        if (int.commandName === 'addia') {
+            const [id, nome, cor, prompt] = [int.options.getString('id'), int.options.getString('nome'), int.options.getString('cor'), int.options.getString('prompt')];
+            db.customIAs[nome.toLowerCase()] = { id, name: nome, color: cor, prompt };
+            saveDB();
+            await int.reply(`✅ IA **${nome}** cadastrada!`);
+        }
+
+        if (int.commandName === 'addpreset') {
+            const nome = int.options.getString('nome');
+            db.presets[nome] = int.options.getString('instrucoes');
+            saveDB();
+            await int.reply(`✨ Preset **${nome}** criado!`);
+        }
+
+        if (int.commandName === 'setmode') {
+            const options = Object.keys(db.presets).map(p => ({ label: p, value: p }));
+            if (options.length === 0) return int.reply("Nenhum preset criado. Use `/addpreset`.");
+            
+            const menu = new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder().setCustomId('select_preset').setPlaceholder('Escolha um modo').addOptions(options)
+            );
+            const btns = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('clear_mode').setLabel('🔄 Restaurar Padrão').setStyle(ButtonStyle.Danger)
+            );
+            await int.reply({ content: "🛠️ **Modos Disponíveis:**", components: [menu, btns] });
+        }
+
+        if (int.commandName === 'reset') {
+            db.memory[int.channelId] = [];
+            saveDB();
+            await int.reply("🧠 Memória do canal limpa!");
+        }
+
+        if (int.commandName === 'config') {
+            if (!db.allowedChannels.includes(int.channelId)) db.allowedChannels.push(int.channelId);
+            saveDB();
+            await int.reply("📍 Este canal agora é oficial do Birutas AI!");
+        }
+    }
+
+    // --- INTERAÇÕES DE BOTÃO/MENU ---
+    if (int.isButton()) {
+        if (int.customId.startsWith('setia_')) {
+            const key = int.customId.replace('setia_', '');
+            db.channelAIs[int.channelId] = key;
+            saveDB();
+            await int.update({ components: getAiButtons(int.channelId) });
+        }
+        if (int.customId === 'clear_mode') {
+            delete db.channelPresets[int.channelId];
+            saveDB();
+            await int.update({ content: "✅ Voltamos ao padrão da IA!", components: [] });
+        }
+        if (int.customId === 'snapshot') {
+            await int.reply("📸 Snapshot em alta definição seria gerado aqui! (Requer API de Canvas ou Carbon)");
+        }
+    }
+
+    if (int.isStringSelectMenu() && int.customId === 'select_preset') {
+        db.channelPresets[int.channelId] = db.presets[int.values[0]];
+        saveDB();
+        await int.update({ content: `🚀 Modo **${int.values[0]}** ativado neste canal!`, components: [] });
     }
 });
 
 client.login(process.env.DISCORD_TOKEN);
-            
