@@ -53,38 +53,62 @@ async function checkLinkVT(url) {
     } catch { return true; }
 }
 
-// --- COMANDOS ---
+// --- COMANDOS (CORRIGIDOS COM DESCRIÇÕES) ---
 const commands = [
     new SlashCommandBuilder().setName('hub').setDescription('Lista TODOS os comandos do Birutas PRO'),
     new SlashCommandBuilder().setName('status').setDescription('Saúde do sistema'),
-    new SlashCommandBuilder().setName('permissao').setDescription('Configura o cargo de Gerência').addRoleOption(o => o.setName('cargo').setRequired(true)),
+    
+    new SlashCommandBuilder().setName('permissao').setDescription('Configura o cargo de Gerência')
+        .addRoleOption(o => o.setName('cargo').setDescription('Cargo que terá permissão de ADM').setRequired(true)),
+    
     new SlashCommandBuilder().setName('config').setDescription('Autoriza a IA neste canal'),
     new SlashCommandBuilder().setName('banchannel').setDescription('Bane a IA deste canal'),
     new SlashCommandBuilder().setName('unbanchannel').setDescription('Remove banimento do canal'),
     new SlashCommandBuilder().setName('logs').setDescription('Define canal de Auditoria'),
     new SlashCommandBuilder().setName('lock').setDescription('Tranca o chat (ADM)'),
     new SlashCommandBuilder().setName('unlock').setDescription('Destranca o chat (ADM)'),
-    new SlashCommandBuilder().setName('slowmode').setDescription('Define modo lento').addIntegerOption(o => o.setName('segundos').setRequired(true)),
+    
+    new SlashCommandBuilder().setName('slowmode').setDescription('Define modo lento')
+        .addIntegerOption(o => o.setName('segundos').setDescription('Tempo em segundos').setRequired(true)),
+    
     new SlashCommandBuilder().setName('coins').setDescription('Ver seu saldo de Birutas Coins'),
     new SlashCommandBuilder().setName('daily').setDescription('Resgatar 100 moedas diárias'),
     new SlashCommandBuilder().setName('rank').setDescription('Ver quem são os mais ricos'),
-    new SlashCommandBuilder().setName('avatar').setDescription('Ver foto de perfil').addUserOption(o => o.setName('user')),
+    
+    new SlashCommandBuilder().setName('avatar').setDescription('Ver foto de perfil')
+        .addUserOption(o => o.setName('user').setDescription('Usuário para ver o avatar')),
+    
     new SlashCommandBuilder().setName('resumo').setDescription('IA resume as últimas mensagens'),
-    new SlashCommandBuilder().setName('imagine').setDescription('Gera imagem via prompt').addStringOption(o => o.setName('prompt').setRequired(true)),
+    
+    new SlashCommandBuilder().setName('imagine').setDescription('Gera imagem via prompt')
+        .addStringOption(o => o.setName('prompt').setDescription('Descrição da imagem').setRequired(true)),
+    
     new SlashCommandBuilder().setName('backup').setDescription('Recebe o database no seu privado'),
-    new SlashCommandBuilder().setName('anuncio').setDescription('Envia mensagem em todos os canais da IA').addStringOption(o => o.setName('texto').setRequired(true)),
+    
+    new SlashCommandBuilder().setName('anuncio').setDescription('Envia mensagem em todos os canais da IA')
+        .addStringOption(o => o.setName('texto').setDescription('Mensagem do anúncio').setRequired(true)),
+    
     new SlashCommandBuilder().setName('configvoz').setDescription('Configura ganhos em call')
         .addIntegerOption(o => o.setName('moedas').setDescription('Coins por minuto'))
         .addBooleanOption(o => o.setName('mutado').setDescription('Contar se estiver mutado?')),
-    new SlashCommandBuilder().setName('addia').setDescription('Adiciona um novo modelo de IA').addStringOption(o => o.setName('id').setRequired(true)).addStringOption(o => o.setName('nome').setRequired(true)).addStringOption(o => o.setName('prompt').setRequired(true)),
+    
+    new SlashCommandBuilder().setName('addia').setDescription('Adiciona um novo modelo de IA')
+        .addStringOption(o => o.setName('id').setDescription('ID do Modelo (ex: deepseek/deepseek-chat)').setRequired(true))
+        .addStringOption(o => o.setName('nome').setDescription('Nome de exibição').setRequired(true))
+        .addStringOption(o => o.setName('prompt').setDescription('Personalidade (System Prompt)').setRequired(true)),
+    
     new SlashCommandBuilder().setName('setmode').setDescription('Troca a IA do canal atual'),
     new SlashCommandBuilder().setName('reset').setDescription('Limpa a memória da conversa no canal')
 ].map(c => c.toJSON());
 
 client.once('ready', async () => {
-    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-    await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
-    console.log("🛡️ Birutas PRO Ativo e Sincronizado!");
+    try {
+        const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+        await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
+        console.log("🛡️ Birutas PRO Ativo e Sincronizado!");
+    } catch (e) {
+        console.error("Erro ao registrar comandos:", e);
+    }
 });
 
 // --- ECONOMIA DE VOZ ---
@@ -120,7 +144,10 @@ client.on('messageCreate', async (msg) => {
     if (!db.allowedChannels.includes(msg.channel.id) || db.bannedChannels.includes(msg.channel.id)) return;
 
     await msg.channel.sendTyping();
-    const ia = db.customIAs[db.channelAIs[msg.channel.id] || 'deepseek'];
+    const iaKey = db.channelAIs[msg.channel.id] || 'deepseek';
+    // Fallback de segurança caso a IA configurada não exista mais
+    const ia = db.customIAs[iaKey] || db.customIAs['deepseek']; 
+
     if (msg.guild.members.me.permissions.has(PermissionFlagsBits.ChangeNickname)) {
         msg.guild.members.me.setNickname(`Birutas [${ia.name}]`).catch(()=>{});
     }
@@ -128,9 +155,22 @@ client.on('messageCreate', async (msg) => {
     try {
         const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST", headers: { "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ model: ia.id, messages: [{role:"system", content: ia.prompt}, ...(db.memory[msg.channel.id]||[]).slice(-6), {role:"user", content: msg.content}] })
+            body: JSON.stringify({ 
+                model: ia.id, 
+                messages: [
+                    {role:"system", content: ia.prompt}, 
+                    ...(db.memory[msg.channel.id]||[]).slice(-6), 
+                    {role:"user", content: msg.content}
+                ] 
+            })
         });
         const data = await res.json();
+        
+        // Tratamento de erro caso a API retorne algo inesperado
+        if (!data.choices || !data.choices[0]) {
+            throw new Error("Resposta inválida da API");
+        }
+
         const reply = data.choices[0].message.content;
 
         const row = new ActionRowBuilder().addComponents(
@@ -141,7 +181,10 @@ client.on('messageCreate', async (msg) => {
         msg.reply({ content: reply, components: [row] });
         db.memory[msg.channel.id] = [...(db.memory[msg.channel.id]||[]), {role:"user", content: msg.content}, {role:"assistant", content: reply}];
         saveDB();
-    } catch (e) { msg.reply("❌ Erro na conexão com a IA."); }
+    } catch (e) { 
+        console.error(e);
+        msg.reply("❌ Erro na conexão com a IA."); 
+    }
 });
 
 // --- INTERAÇÕES ---
@@ -177,6 +220,15 @@ client.on('interactionCreate', async (int) => {
             return int.reply("✅ Anúncio disparado!"); 
         }
 
+        if (int.commandName === 'configvoz') {
+            const moedas = int.options.getInteger('moedas');
+            const mutado = int.options.getBoolean('mutado');
+            if (moedas) db.voiceConfig.coinsPerMin = moedas;
+            if (mutado !== null) db.voiceConfig.allowMuted = mutado;
+            saveDB();
+            return int.reply(`🎙️ Config Voz: **${db.voiceConfig.coinsPerMin} coins/min** | Mute permitido: **${db.voiceConfig.allowMuted ? 'Sim' : 'Não'}**`);
+        }
+
         if (int.commandName === 'daily') {
             db.economy[int.user.id] = (db.economy[int.user.id] || 0) + 100;
             saveDB();
@@ -184,16 +236,36 @@ client.on('interactionCreate', async (int) => {
         }
 
         if (int.commandName === 'coins') return int.reply(`💰 Saldo atual: **${db.economy[int.user.id] || 0} Birutas Coins**`);
+        
+        if (int.commandName === 'rank') {
+            const sorted = Object.entries(db.economy).sort((a, b) => b[1] - a[1]).slice(0, 10);
+            const list = sorted.map((u, i) => `${i+1}. <@${u[0]}>: ${u[1]} coins`).join('\n') || "Ninguém tem moedas ainda.";
+            const embed = new EmbedBuilder().setTitle("🏆 Ranking de Riqueza").setDescription(list).setColor("#FFD700");
+            return int.reply({ embeds: [embed] });
+        }
 
         if (int.commandName === 'setmode') {
             const select = new StringSelectMenuBuilder().setCustomId('select_ia').setPlaceholder('Selecione a IA do canal').addOptions(Object.keys(db.customIAs).map(k => ({ label: db.customIAs[k].name, value: k })));
             return int.reply({ components: [new ActionRowBuilder().addComponents(select)] });
         }
 
+        if (int.commandName === 'addia') {
+            const newId = int.options.getString('nome').toLowerCase().replace(/\s+/g, '-');
+            db.customIAs[newId] = {
+                id: int.options.getString('id'),
+                name: int.options.getString('nome'),
+                prompt: int.options.getString('prompt'),
+                color: "#00ff00"
+            };
+            saveDB();
+            return int.reply(`✅ IA **${int.options.getString('nome')}** adicionada com sucesso!`);
+        }
+
         if (int.commandName === 'backup') { await int.user.send({ files: [DB_FILE] }); return int.reply("📂 O database foi enviado no seu privado!"); }
         if (int.commandName === 'reset') { db.memory[int.channelId] = []; saveDB(); return int.reply("🧹 Memória da IA limpa para este canal!"); }
         if (int.commandName === 'status') return int.reply(`🛰️ **Online** | Ping: ${client.ws.ping}ms | Uptime: ${Math.floor(process.uptime()/60)}m`);
         if (int.commandName === 'permissao') { db.adminRole = int.options.getRole('cargo').id; saveDB(); return int.reply("✅ Cargo de ADM configurado!"); }
+        if (int.commandName === 'avatar') { const user = int.options.getUser('user') || int.user; return int.reply(user.displayAvatarURL({ size: 512 })); }
     }
 
     if (int.isStringSelectMenu() && int.customId === 'select_ia') {
