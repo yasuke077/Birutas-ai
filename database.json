@@ -3,6 +3,7 @@
   "adminRole": null,
   "logChannel": null,
   "channelAIs": {},
+  "channelPresets": {},
   "memory": {},
   "economy": {},
   "inventory": {},
@@ -15,12 +16,13 @@
     "deepseek": {
       "id": "deepseek/deepseek-chat",
       "name": "DeepSeek R1",
-      "prompt": "Você é o DeepSeek, uma IA útil e inteligente."
+      "prompt": "Você é o DeepSeek R1, uma inteligência artificial útil."
     },
     "venice": {
       "id": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
-      "name": "Venice AI",
-      "prompt": "Você é a Venice AI, focada em liberdade e honestidade técnica."
+      "name": "Venice",
+      "prompt": "Você é a Venice, uma inteligência artificial direta e honesta."
     }
-  }
+  },
+  "presets": {}
 }
