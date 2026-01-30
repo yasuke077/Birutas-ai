@@ -30,15 +30,29 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
-// --- BANCO DE DADOS (VERSÃO CORRIGIDA) ---
+// --- BANCO DE DADOS (CONFIGURAÇÃO CORRETA) ---
+const DB_FILE = './database.json';
+
+// 1. Criamos o objeto inicial padrão
+let db = { 
+    allowedChannels: [], 
+    channelAIs: {}, 
+    memory: {}, 
+    channelPresets: {},
+    customIAs: {
+        deepseek: { id: "deepseek/deepseek-chat", name: "DeepSeek", color: "#0099ff", prompt: "Você é o DeepSeek." }
+    },
+    presets: {} 
+};
+
+// 2. Tentamos carregar o ficheiro existente e mesclar com o padrão
 if (fs.existsSync(DB_FILE)) {
     try { 
         const savedData = JSON.parse(fs.readFileSync(DB_FILE));
-        // Faz um "merge" para garantir que as categorias obrigatórias existam
         db = { ...db, ...savedData }; 
         
-        // Se após o carregamento o customIAs ainda não existir, força a criação do padrão
-        if (!db.customIAs) {
+        // Garante que customIAs nunca fique vazio após o load
+        if (!db.customIAs || Object.keys(db.customIAs).length === 0) {
             db.customIAs = {
                 deepseek: { id: "deepseek/deepseek-chat", name: "DeepSeek", color: "#0099ff", prompt: "Você é o DeepSeek." }
             };
@@ -48,6 +62,7 @@ if (fs.existsSync(DB_FILE)) {
     }
 }
 
+// 3. Função para salvar
 function saveDB() { 
     try {
         fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2)); 
