@@ -9,7 +9,6 @@ const {
     AttachmentBuilder
 } = require('discord.js');
 const express = require('express');
-const fetch = require('node-fetch');
 const mongoose = require('mongoose');
 const { createCanvas, loadImage } = require('canvas');
 const cheerio = require('cheerio');
@@ -821,3 +820,4 @@ client.on('interactionCreate', async interaction => {
 
 // 🚀 LOGIN FINAL
 client.login(process.env.DISCORD_TOKEN);
+
