@@ -6,15 +6,20 @@
   "scripts": {
     "start": "node index.js"
   },
+  "keywords": ["discord", "bot", "ai", "economy", "gamification"],
+  "author": "Cade",
+  "license": "MIT",
   "dependencies": {
     "discord.js": "^14.14.1",
     "mongoose": "^8.0.0",
     "canvas": "^2.11.2",
     "cheerio": "^1.0.0-rc.12",
     "express": "^4.18.2",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "canvas": "2.11.2"
   },
   "engines": {
     "node": "20.x"
   }
 }
+
