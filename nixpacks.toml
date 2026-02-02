@@ -1,0 +1,6 @@
+[phases.setup]
+nixPkgs = ["...", "ffmpeg", "libuuid"]
+aptPkgs = ["libgmp-dev", "libcairo2-dev", "libpango1.0-dev", "libjpeg-dev", "libgif-dev", "libwebp-dev", "libfontconfig1-dev", "ttf-dejavu", "fonts-noto-color-emoji"]
+
+[start]
+cmd = "node index.js"
