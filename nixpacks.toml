@@ -1,2 +1,0 @@
-[phases.setup]
-nixPkgs = ["...", "fontconfig", "dejavu_fonts", "noto-fonts-emoji", "libsodium", "ffmpeg"]
