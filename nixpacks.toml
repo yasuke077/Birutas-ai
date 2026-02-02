@@ -1,5 +1,0 @@
-packages = ["libgmp-dev", "libcairo2-dev", "libpango1.0-dev", "libjpeg-dev", "libgif-dev", "libwebp-dev", "libfontconfig1-dev", "ttf-dejavu", "fonts-noto-color-emoji", "ffmpeg"]
-
-# Configurações do ambiente de execução (opcional, mas recomendado)
-[start]
-cmd = "node index.js"
