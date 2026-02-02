@@ -5,8 +5,6 @@
  * @version 8.9.0-ULTIMATE-MAX
  */
 
-import 'dotenv/config';
-
 import {
     Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder,
     ButtonStyle, REST, Routes, SlashCommandBuilder, PermissionFlagsBits,
@@ -2140,4 +2138,5 @@ client.login(process.env.DISCORD_TOKEN);
 // ============================
 // ===== INDEX 4 END ========
 // ============================
+
 
