@@ -458,7 +458,7 @@ const DEFAULT_IAS = {
         desc: "(Criativo)",
         color: "#9C27B0",
         prompt: "Você é o Qwen, uma IA criativa e versátil. Responda de forma natural e amigável em Português Brasileiro."
-    }
+    },
     phi: {
         id: "microsoft/phi-3-mini-128k-instruct:free",
         name: "GPT-4 Mini",
