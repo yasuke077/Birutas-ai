@@ -417,6 +417,13 @@ const ALL_BADGES = {
 // 🧠 CONFIGURAÇÃO DAS IAs (TODAS GRATUITAS VIA OPENROUTER)
 // ═══════════════════════════════════════════════════════════════
 const DEFAULT_IAS = {
+    gemini: {
+        id: "google/gemini-2.5-flash",
+        name: "Gemini",
+        desc: "(Lógica)",
+        color: "#4285F4",
+        prompt: "Você é o Gemini do Google. Uma IA altamente lógica, prestativa e inteligente. Responda sempre em Português Brasileiro de forma clara."
+    },
     venice: {
         id: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
         name: "Venice",
