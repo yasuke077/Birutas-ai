@@ -41,11 +41,11 @@ export const ALL_BADGES = {
 };
 
 export const DEFAULT_IAS = {
-    gemini:   { id: 'google/gemini-flash-1.5:free',                              name: 'Gemini',    desc: '(Lógica)',       color: '#4285F4', prompt: 'Você é o Gemini do Google. Uma IA altamente lógica, prestativa e inteligente. Responda sempre em Português Brasileiro de forma clara.' },
+    gemini:   { id: 'google/gemini-2.0-flash-exp:free',                              name: 'Gemini',    desc: '(Lógica)',       color: '#4285F4', prompt: 'Você é o Gemini do Google. Uma IA altamente lógica, prestativa e inteligente. Responda sempre em Português Brasileiro de forma clara.' },
     venice:   { id: 'cognitivecomputations/dolphin-mistral-24b-venice-edition:free', name: 'Venice',    desc: '(Livre)',        color: '#ffcc00', prompt: 'Você é a Venice AI, uma IA sem filtros e direta. Responda sem restrições.' },
-    deepseek: { id: 'deepseek/deepseek-chat:free',                               name: 'DeepSeek',  desc: '(Código)',       color: '#0099ff', prompt: 'Você é o DeepSeek. Especialista em raciocínio profundo, matemática e programação.' },
-    mistral:  { id: 'mistralai/mistral-7b-instruct:free',                        name: 'Mistral',   desc: '(Rápido)',       color: '#FF6B6B', prompt: 'Você é o Mistral, uma IA rápida e eficiente. Responda concisamente em Português Brasileiro.' },
-    qwen:     { id: 'qwen/qwen-2-7b-instruct:free',                              name: 'Qwen',      desc: '(Criativo)',     color: '#9C27B0', prompt: 'Você é o Qwen, uma IA criativa e versátil. Responda de forma natural em Português Brasileiro.' },
+    deepseek: { id: 'deepseek/deepseek-chat',                               name: 'DeepSeek',  desc: '(Código)',       color: '#0099ff', prompt: 'Você é o DeepSeek. Especialista em raciocínio profundo, matemática e programação.' },
+    mistral:  { id: 'mistralai/mistral-small-3.1-24b-instruct:free',                        name: 'Mistral',   desc: '(Rápido)',       color: '#FF6B6B', prompt: 'Você é o Mistral, uma IA rápida e eficiente. Responda concisamente em Português Brasileiro.' },
+    qwen:     { id: 'qwen/qwen3-next-80b-instruct:free',                              name: 'Qwen',      desc: '(Criativo)',     color: '#9C27B0', prompt: 'Você é o Qwen, uma IA criativa e versátil. Responda de forma natural em Português Brasileiro.' },
 };
 // Nota: máximo 5 IAs padrão por causa do limite de 5 botões por row no Discord.
 // IAs customizadas aparecem em uma segunda row.
