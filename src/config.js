@@ -87,7 +87,7 @@ export const DEFAULT_IAS = {
         prompt: 'Voce e o GPT-4o Mini da OpenAI. Uma IA precisa, eficiente e util. Responda sempre em Portugues Brasileiro de forma clara e detalhada.'
     },
     venice: {
-        id: 'venice-uncensored',
+        id: 'nousresearch/hermes-3-llama-3.1-405b:free',
         name: 'Venice AI',
         desc: '(Venice)',
         color: '#7C3AED',
